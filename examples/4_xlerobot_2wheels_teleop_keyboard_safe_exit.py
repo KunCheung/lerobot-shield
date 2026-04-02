@@ -485,6 +485,11 @@ smooth_controller = SmoothBaseController()
 SHUTDOWN_SETTLE_TIMEOUT_S = 4.0
 SHUTDOWN_CONTROL_FPS = 30
 SHUTDOWN_POSITION_TOLERANCE = 5.0
+SHUTDOWN_HOLD_BEFORE_RETURN_S = 2.0
+SAFE_ARM_STOW_X = 0.13
+SAFE_ARM_STOW_Y = 0.10
+SAFE_ARM_STOW_PITCH = 0.0
+SAVE_SAFE_POSE_KEY = "v"
 
 
 def safe_log_rerun(observation=None, action=None):
@@ -511,18 +516,89 @@ def _compute_head_target_error(obs, head_control):
     return max(errors, default=0.0)
 
 
-def _set_shutdown_targets(left_arm, right_arm, head_control):
-    left_arm.target_positions = left_arm.zero_pos.copy()
-    left_arm.current_x = 0.1629
-    left_arm.current_y = 0.1131
-    left_arm.pitch = 0.0
-    left_arm.target_positions["wrist_flex"] = 0.0
+def _capture_current_safe_pose(obs):
+    return {
+        "left_arm": {
+            joint_name: obs[f"{motor_name}.pos"]
+            for joint_name, motor_name in LEFT_JOINT_MAP.items()
+        },
+        "right_arm": {
+            joint_name: obs[f"{motor_name}.pos"]
+            for joint_name, motor_name in RIGHT_JOINT_MAP.items()
+        },
+        "head": {
+            motor_name: obs[f"{mapped_name}.pos"]
+            for motor_name, mapped_name in HEAD_MOTOR_MAP.items()
+        },
+    }
 
-    right_arm.target_positions = right_arm.zero_pos.copy()
-    right_arm.current_x = 0.1629
-    right_arm.current_y = 0.1131
-    right_arm.pitch = 0.0
-    right_arm.target_positions["wrist_flex"] = 0.0
+
+def _print_safe_pose(safe_pose, source):
+    print(f"[SAFE_POSE] Updated from {source}")
+    print(f"[SAFE_POSE] Left arm: {safe_pose['left_arm']}")
+    print(f"[SAFE_POSE] Right arm: {safe_pose['right_arm']}")
+    print(f"[SAFE_POSE] Head: {safe_pose['head']}")
+
+
+def _build_pose_hold_action(pose):
+    action = {
+        "x.vel": 0.0,
+        "theta.vel": 0.0,
+    }
+
+    for joint_name, target in pose["left_arm"].items():
+        action[f"{LEFT_JOINT_MAP[joint_name]}.pos"] = target
+
+    for joint_name, target in pose["right_arm"].items():
+        action[f"{RIGHT_JOINT_MAP[joint_name]}.pos"] = target
+
+    for motor_name, target in pose["head"].items():
+        action[f"{HEAD_MOTOR_MAP[motor_name]}.pos"] = target
+
+    return action
+
+
+def _build_arm_safe_pose(arm, obs):
+    gripper_key = f"{arm.prefix}_arm_gripper.pos"
+
+    try:
+        shoulder_lift, elbow_flex = arm.kinematics.inverse_kinematics(
+            SAFE_ARM_STOW_X,
+            SAFE_ARM_STOW_Y,
+        )
+        wrist_flex = -shoulder_lift - elbow_flex + SAFE_ARM_STOW_PITCH
+        target_positions = {
+            "shoulder_pan": 0.0,
+            "shoulder_lift": shoulder_lift,
+            "elbow_flex": elbow_flex,
+            "wrist_flex": wrist_flex,
+            "wrist_roll": 0.0,
+            # Keep the current gripper state so shutdown does not also pinch/open unexpectedly.
+            "gripper": obs.get(gripper_key, arm.target_positions.get("gripper", 0.0)),
+        }
+    except Exception as exc:
+        print(f"[SHUTDOWN] Failed to compute {arm.prefix} arm stow pose, falling back to zero pose: {exc}")
+        target_positions = arm.zero_pos.copy()
+
+    return target_positions
+
+
+def _set_shutdown_targets(left_arm, right_arm, head_control, obs, saved_safe_pose=None):
+    if saved_safe_pose is not None:
+        left_arm.target_positions = saved_safe_pose["left_arm"].copy()
+        right_arm.target_positions = saved_safe_pose["right_arm"].copy()
+        head_control.target_positions = saved_safe_pose["head"].copy()
+        return
+
+    left_arm.target_positions = _build_arm_safe_pose(left_arm, obs)
+    left_arm.current_x = SAFE_ARM_STOW_X
+    left_arm.current_y = SAFE_ARM_STOW_Y
+    left_arm.pitch = SAFE_ARM_STOW_PITCH
+
+    right_arm.target_positions = _build_arm_safe_pose(right_arm, obs)
+    right_arm.current_x = SAFE_ARM_STOW_X
+    right_arm.current_y = SAFE_ARM_STOW_Y
+    right_arm.pitch = SAFE_ARM_STOW_PITCH
 
     head_control.target_positions = head_control.zero_pos.copy()
 
@@ -536,7 +612,7 @@ def _safe_disconnect(device, name):
         print(f"[SHUTDOWN] Failed to disconnect {name}: {exc}")
 
 
-def controlled_shutdown(robot, keyboard, left_arm, right_arm, head_control, reason, fps=SHUTDOWN_CONTROL_FPS):
+def controlled_shutdown(robot, keyboard, left_arm, right_arm, head_control, reason, saved_safe_pose=None, fps=SHUTDOWN_CONTROL_FPS):
     print(f"[SHUTDOWN] Starting controlled shutdown: {reason}")
 
     try:
@@ -548,7 +624,30 @@ def controlled_shutdown(robot, keyboard, left_arm, right_arm, head_control, reas
         smooth_controller.is_moving = False
         smooth_controller.last_direction = {}
 
-        _set_shutdown_targets(left_arm, right_arm, head_control)
+        shutdown_obs = robot.get_observation()
+        hold_pose = _capture_current_safe_pose(shutdown_obs)
+
+        if SHUTDOWN_HOLD_BEFORE_RETURN_S > 0:
+            print(f"[SHUTDOWN] Holding current pose for {SHUTDOWN_HOLD_BEFORE_RETURN_S:.1f}s before moving to safe pose")
+            hold_deadline = time.time() + SHUTDOWN_HOLD_BEFORE_RETURN_S
+            hold_action = _build_pose_hold_action(hold_pose)
+
+            while time.time() < hold_deadline:
+                robot.send_action(hold_action)
+
+                try:
+                    if hasattr(robot, "stop_base"):
+                        robot.stop_base()
+                except Exception as exc:
+                    print(f"[SHUTDOWN] Non-fatal base stop error during hold: {exc}")
+
+                precise_sleep(1.0 / fps)
+
+            shutdown_obs = robot.get_observation()
+
+        _set_shutdown_targets(left_arm, right_arm, head_control, shutdown_obs, saved_safe_pose)
+        print(f"[SHUTDOWN] Left arm safe pose: {left_arm.target_positions}")
+        print(f"[SHUTDOWN] Right arm safe pose: {right_arm.target_positions}")
         deadline = time.time() + SHUTDOWN_SETTLE_TIMEOUT_S
 
         while time.time() < deadline:
@@ -642,6 +741,9 @@ def main():
     left_arm = SimpleTeleopArm(kin_left, LEFT_JOINT_MAP, obs, prefix="left")
     right_arm = SimpleTeleopArm(kin_right, RIGHT_JOINT_MAP, obs, prefix="right")
     head_control = SimpleHeadControl(obs)
+    saved_safe_pose = _capture_current_safe_pose(obs)
+    _print_safe_pose(saved_safe_pose, "startup observation")
+    previous_pressed_keys = set()
 
     # Move both arms and head to zero position at start
     left_arm.move_to_zero_position(robot)
@@ -692,6 +794,7 @@ def main():
     print(f"    </>: Head Motor 1 +/- (head_motor_1)")
     print(f"    ,/.: Head Motor 2 +/- (head_motor_2)")
     print(f"    ?: Head reset to zero position")
+    print(f"    {SAVE_SAFE_POSE_KEY.upper()}: Save current robot pose as shutdown safe pose")
     
     print(f"\n⚙️ Robot Configuration:")
     print(f"   Wheel Radius: {robot.config.wheel_radius:.3f}m")
@@ -723,6 +826,11 @@ def main():
             if robot.teleop_keys["quit"] in pressed_keys:
                 shutdown_reason = f"quit key '{robot.teleop_keys['quit']}' pressed"
                 break
+
+            if SAVE_SAFE_POSE_KEY in pressed_keys and SAVE_SAFE_POSE_KEY not in previous_pressed_keys:
+                current_obs = robot.get_observation()
+                saved_safe_pose = _capture_current_safe_pose(current_obs)
+                _print_safe_pose(saved_safe_pose, "live robot observation")
 
             left_key_state = {action: (key in pressed_keys) for action, key in LEFT_KEYMAP.items()}
             right_key_state = {action: (key in pressed_keys) for action, key in RIGHT_KEYMAP.items()}
@@ -771,6 +879,7 @@ def main():
             obs = robot.get_observation()
             # print(f"[MAIN] Observation: {obs}")
             safe_log_rerun(obs, action)
+            previous_pressed_keys = pressed_keys
             # busy_wait(1.0 / FPS)
     except KeyboardInterrupt:
         shutdown_reason = "keyboard interrupt"
@@ -778,7 +887,15 @@ def main():
         shutdown_reason = f"unexpected error: {exc}"
         fatal_error = exc
     finally:
-        controlled_shutdown(robot, keyboard, left_arm, right_arm, head_control, shutdown_reason)
+        controlled_shutdown(
+            robot,
+            keyboard,
+            left_arm,
+            right_arm,
+            head_control,
+            shutdown_reason,
+            saved_safe_pose=saved_safe_pose,
+        )
 
     if fatal_error is not None:
         raise fatal_error
