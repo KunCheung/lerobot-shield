@@ -1,91 +1,80 @@
-# XLeRobot 2-Wheels (Differential Drive)
+# XLerobot 2-Wheels
 
-This is a modified version of XLeRobot that uses a 2-wheel differential drive base instead of the original 3-wheel omni wheel base.
+`XLerobot2Wheels` 是这个仓库里对两轮差速版 XLerobot 的接入实现。
 
-## Key Changes from Original XLeRobot
+它运行在 LeRobot 的机器人接口之上，所以你可以继续复用 `lerobot` 的配置和工具链，同时直接控制两轮差速底盘、双臂和头部。
 
-### Hardware Changes
-- **Wheels**: Reduced from 3 omni wheels to 2 differential drive wheels
-- **Motor IDs**: 
-  - Left wheel: Motor ID 9
-  - Right wheel: Motor ID 10
-  - Removed: Back wheel (previously Motor ID 8)
+## 这个版本和原始 XLerobot 的区别
 
-### Kinematics Changes
-- **Movement**: Only supports forward/backward (x) and rotation (θ)
-- **No lateral movement**: Cannot move sideways (y) like the omni wheel version
-- **Differential drive equations**:
-  - Left wheel speed = (v - ω*L/2) / r
-  - Right wheel speed = (v + ω*L/2) / r
-  - Where v = linear velocity, ω = angular velocity, L = wheelbase, r = wheel radius
+- 底盘从 3 轮全向改为 2 轮差速
+- 主要支持：
+  - 前进 / 后退
+  - 原地旋转
+- 不支持原始全向底盘那种横移
 
-### Configuration Parameters
-- `wheel_radius`: 0.05 meters (default)
-- `wheelbase`: 0.25 meters (default)
-- These can be adjusted in the config files
+## 依赖安装
 
-### Control Interface
-- **Forward/Backward**: 'i'/'k' keys
-- **Rotate Left/Right**: 'u'/'o' keys
-- **Speed Control**: 'n'/'m' keys (3 speed levels)
-- **No lateral movement keys**: 'j'/'l' keys removed
+建议在仓库根目录安装：
 
-## Usage
-
-### Running the Host (on robot hardware)
 ```bash
-PYTHONPATH=src python -m lerobot.robots.xlerobot_2wheels.xlerobot_2wheels_host --robot.id=my_xlerobot_2wheels
+python -m pip install -e ".[feetech]"
+python -m pip install pyzmq
 ```
 
-### Running the Teleop Client
+## 主要入口
+
+- 标准键盘遥操作：
+  - `examples/4_xlerobot_2wheels_teleop_keyboard.py`
+- 安全退出版本：
+  - `examples/shield/4_xlerobot_2wheels_teleop_keyboard_safe_exit.py`
+- Host：
+  - `lerobot.robots.xlerobot_2wheels.xlerobot_2wheels_host`
+
+## 直连使用
+
+先根据你的实际硬件修改脚本中的：
+
+- `robot id`
+- `port1`
+- `port2`
+
+然后运行：
+
 ```bash
-PYTHONPATH=src python -m examples.xlerobot_2wheels.teleoperate_Keyboard
+python ./examples/4_xlerobot_2wheels_teleop_keyboard.py
 ```
 
-### Direct Connection (no ZMQ)
+如果你想使用带安全退出流程的版本：
+
+```bash
+python ./examples/shield/4_xlerobot_2wheels_teleop_keyboard_safe_exit.py
+```
+
+## Host / Client 模式
+
+在连接机器人硬件的电脑上运行 host：
+
+```bash
+PYTHONPATH=src python -m lerobot.robots.xlerobot_2wheels.xlerobot_2wheels_host --robot.id=my_xlerobot_2wheels --robot.port1=COM5 --robot.port2=COM4
+```
+
+在客户端脚本中使用：
+
 ```python
-from lerobot.robots.xlerobot_2wheels import XLerobot2Wheels, XLerobot2WheelsConfig
+from lerobot.robots.xlerobot_2wheels import XLerobot2WheelsClient, XLerobot2WheelsClientConfig
 
-config = XLerobot2WheelsConfig()
-robot = XLerobot2Wheels(config)
+config = XLerobot2WheelsClientConfig(remote_ip="ROBOT_PC_IP", id="my_xlerobot_2wheels")
+robot = XLerobot2WheelsClient(config)
 robot.connect()
 ```
 
-## Files Structure
+## 常见控制键
 
-- `xlerobot_2wheels.py`: Main robot class with differential drive kinematics
-- `xlerobot_2wheels_client.py`: ZMQ client for remote control
-- `xlerobot_2wheels_host.py`: ZMQ host running on robot hardware
-- `config_xlerobot_2wheels.py`: Configuration classes
-- `__init__.py`: Package initialization
+- `i` / `k`
+  - 前进 / 后退
+- `u` / `o`
+  - 左旋 / 右旋
+- `n` / `m`
+  - 加速 / 减速
 
-## Key Differences from Original
-
-1. **State Features**: Removed `y.vel` from state features (only `x.vel` and `theta.vel`)
-2. **Motor Configuration**: Only 2 base motors instead of 3
-3. **Kinematics Functions**: 
-   - `_body_to_wheel_raw()`: Implements differential drive forward kinematics
-   - `_wheel_raw_to_body()`: Implements differential drive inverse kinematics
-4. **Control Interface**: Simplified to only support differential drive movements
-
-## Advantages of Differential Drive
-
-1. **Simpler Hardware**: Only 2 wheels instead of 3
-2. **Lower Cost**: Fewer motors and simpler mechanical design
-3. **Easier Maintenance**: Less complex wheel system
-4. **Better for Indoor**: More suitable for flat indoor environments
-
-## Limitations
-
-1. **No Lateral Movement**: Cannot move sideways without rotating first
-2. **Less Maneuverable**: Requires more complex maneuvers for precise positioning
-3. **Wheel Slip**: May experience wheel slip on uneven surfaces
-
-## Migration from Original XLeRobot
-
-To migrate from the original 3-wheel version:
-
-1. Update motor IDs in hardware configuration
-2. Remove the back wheel motor
-3. Update control code to use only forward/backward and rotation commands
-4. Adjust movement strategies to account for no lateral movement capability
+完整键位请以示例脚本启动后的终端输出为准。

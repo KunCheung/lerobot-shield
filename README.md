@@ -1,176 +1,254 @@
-<p align="center">
-  <img alt="LeRobot, Hugging Face Robotics Library" src="./media/readme/lerobot-logo-thumbnail.png" width="100%">
-</p>
+# LeRobot Shield
 
-<div align="center">
+`lerobot-shield` 是一个面向 XLerobot 实机使用的 LeRobot fork。
 
-[![Tests](https://github.com/huggingface/lerobot/actions/workflows/nightly.yml/badge.svg?branch=main)](https://github.com/huggingface/lerobot/actions/workflows/nightly.yml?query=branch%3Amain)
-[![Python versions](https://img.shields.io/pypi/pyversions/lerobot)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/huggingface/lerobot/blob/main/LICENSE)
-[![Status](https://img.shields.io/pypi/status/lerobot)](https://pypi.org/project/lerobot/)
-[![Version](https://img.shields.io/pypi/v/lerobot)](https://pypi.org/project/lerobot/)
-[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-v2.1-ff69b4.svg)](https://github.com/huggingface/lerobot/blob/main/CODE_OF_CONDUCT.md)
-[![Discord](https://img.shields.io/badge/Discord-Join_Us-5865F2?style=flat&logo=discord&logoColor=white)](https://discord.gg/q8Dzzpym3f)
+这个仓库把两部分合并到了同一个代码库里：
 
-</div>
+- **上游 LeRobot**
+  - 统一机器人接口
+  - 数据集工具
+  - 训练 / 评估基础设施
+- **XLerobot 集成**
+  - `XLerobot`
+  - `XLerobot2Wheels`
+  - 键盘 / JoyCon / VR 遥操作示例
+  - 更安全的 `shield` 退出示例
 
-**LeRobot** aims to provide models, datasets, and tools for real-world robotics in PyTorch. The goal is to lower the barrier to entry so that everyone can contribute to and benefit from shared datasets and pretrained models.
+写得更直白一点：
+这是一个“**LeRobot 框架 + XLerobot 硬件接入**”的合并版仓库，目标是既能直接控制 XLerobot，也能继续复用 LeRobot 的工程结构和工具链。
 
-🤗 A hardware-agnostic, Python-native interface that standardizes control across diverse platforms, from low-cost arms (SO-100) to humanoids.
+官方 XLeRobot 软件文档可参考：
+<https://xlerobot.readthedocs.io/zh-cn/latest/software/index.html>
 
-🤗 A standardized, scalable LeRobotDataset format (Parquet + MP4 or images) hosted on the Hugging Face Hub, enabling efficient storage, streaming and visualization of massive robotic datasets.
+## 仓库里有什么
 
-🤗 State-of-the-art policies that have been shown to transfer to the real-world ready for training and deployment.
+与 XLerobot 直接相关的主要入口如下：
 
-🤗 Comprehensive support for the open-source ecosystem to democratize physical AI.
+- `src/lerobot/robots/xlerobot`
+  - 原始 XLerobot 机器人实现
+- `src/lerobot/robots/xlerobot_2wheels`
+  - 两轮差速版 XLerobot 实现
+- `examples/4_xlerobot_teleop_keyboard.py`
+  - 原始 XLerobot 键盘遥操作
+- `examples/4_xlerobot_2wheels_teleop_keyboard.py`
+  - 两轮差速版键盘遥操作
+- `examples/shield/4_xlerobot_2wheels_teleop_keyboard_safe_exit.py`
+  - 带安全退出流程的两轮差速版键盘遥操作
 
-## Quick Start
+## 安装
 
-LeRobot can be installed directly from PyPI.
+### 1. 环境要求
+
+- Python `>=3.12`
+- 建议使用虚拟环境或 conda 环境
+- 如果控制 XLerobot 实机，需要 Feetech 电机依赖
+
+### 2. 推荐安装方式
+
+在仓库根目录执行：
 
 ```bash
-pip install lerobot
+python -m venv .venv
+```
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+Linux / macOS:
+
+```bash
+source .venv/bin/activate
+```
+
+安装仓库本体和 XLerobot 常用依赖：
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -e ".[feetech]"
+python -m pip install pyzmq
+```
+
+这里推荐额外安装 `pyzmq`，因为：
+
+- `xlerobot_2wheels` 包会同时暴露本地类、host、client
+- 即使你主要走直连模式，导入时也可能需要 ZMQ 依赖
+
+### 3. 验证是否使用的是本地源码
+
+```bash
+python -c "import lerobot; print(lerobot.__file__)"
+```
+
+输出路径应该落在当前仓库的 `src/lerobot` 下，而不是旧的 `site-packages/lerobot`。
+
+## 快速指南
+
+这部分参考了 XLeRobot 官方软件文档里的“快速指南”思路，但改成了这个 fork 当前真实可运行的方式。
+
+建议按下面顺序熟悉：
+
+1. 先确保机械臂和电机总线通信正常
+2. 再跑 XLerobot 键盘遥操作
+3. 最后再进入更复杂的自定义开发
+
+对于 XLerobot 基础版本或 2-wheel 版本，通常都可以直接使用你的笔记本电脑，不一定必须先上树莓派。
+
+## XLerobot 的使用方式
+
+### 1. 查串口
+
+如果是直连实机，先查电机总线端口：
+
+```bash
+lerobot-find-port
+```
+
+对于这个仓库里的 `XLerobot2Wheels`，常见连接方式是：
+
+- `port1`: 左臂 + 头部
+- `port2`: 右臂 + 底盘
+
+你需要把示例脚本中的端口改成你机器上的实际值。
+
+### 2. 原始 XLerobot 键盘遥操作
+
+运行：
+
+```bash
+python ./examples/4_xlerobot_teleop_keyboard.py
+```
+
+这个脚本对应：
+
+- `src/lerobot/robots/xlerobot`
+
+### 3. 两轮差速版 XLerobot 键盘遥操作
+
+先修改：
+
+- `examples/4_xlerobot_2wheels_teleop_keyboard.py`
+
+把其中的：
+
+- `robot id`
+- `port1`
+- `port2`
+
+改成你自己的机器人配置，然后运行：
+
+```bash
+python ./examples/4_xlerobot_2wheels_teleop_keyboard.py
+```
+
+这个脚本对应：
+
+- `src/lerobot/robots/xlerobot_2wheels`
+
+### 4. Shield 安全退出版本
+
+运行：
+
+```bash
+python ./examples/shield/4_xlerobot_2wheels_teleop_keyboard_safe_exit.py
+```
+
+这个版本适合两轮差速机器人，因为它在退出时做了受控处理：
+
+- 可用 `V` 记录当前姿态为安全位
+- 退出时先短暂停住当前姿态
+- 再回到安全位
+- 最后再断开
+
+如果你担心原始脚本退出时手臂直接下坠，优先使用这个版本。
+
+### 5. Host / Client 网络模式
+
+如果电机连接在另一台电脑上，可以把那台电脑作为 host。
+
+在连接机器人硬件的电脑上运行：
+
+```bash
+PYTHONPATH=src python -m lerobot.robots.xlerobot_2wheels.xlerobot_2wheels_host --robot.id=my_xlerobot_2wheels --robot.port1=COM5 --robot.port2=COM4
+```
+
+在客户端脚本中使用：
+
+```python
+from lerobot.robots.xlerobot_2wheels import XLerobot2WheelsClient, XLerobot2WheelsClientConfig
+
+config = XLerobot2WheelsClientConfig(remote_ip="ROBOT_PC_IP", id="my_xlerobot_2wheels")
+robot = XLerobot2WheelsClient(config)
+robot.connect()
+```
+
+## 常用命令
+
+查看安装信息：
+
+```bash
 lerobot-info
 ```
 
-> [!IMPORTANT]
-> For detailed installation guide, please see the [Installation Documentation](https://huggingface.co/docs/lerobot/installation).
-
-## Robots & Control
-
-<div align="center">
-  <img src="./media/readme/robots_control_video.webp" width="640px" alt="Reachy 2 Demo">
-</div>
-
-LeRobot provides a unified `Robot` class interface that decouples control logic from hardware specifics. It supports a wide range of robots and teleoperation devices.
-
-```python
-from lerobot.robots.myrobot import MyRobot
-
-# Connect to a robot
-robot = MyRobot(config=...)
-robot.connect()
-
-# Read observation and send action
-obs = robot.get_observation()
-action = model.select_action(obs)
-robot.send_action(action)
-```
-
-**Supported Hardware:** SO100, LeKiwi, Koch, HopeJR, OMX, EarthRover, Reachy2, Gamepads, Keyboards, Phones, OpenARM, Unitree G1.
-
-While these devices are natively integrated into the LeRobot codebase, the library is designed to be extensible. You can easily implement the Robot interface to utilize LeRobot's data collection, training, and visualization tools for your own custom robot.
-
-For detailed hardware setup guides, see the [Hardware Documentation](https://huggingface.co/docs/lerobot/integrate_hardware).
-
-## LeRobot Dataset
-
-To solve the data fragmentation problem in robotics, we utilize the **LeRobotDataset** format.
-
-- **Structure:** Synchronized MP4 videos (or images) for vision and Parquet files for state/action data.
-- **HF Hub Integration:** Explore thousands of robotics datasets on the [Hugging Face Hub](https://huggingface.co/lerobot).
-- **Tools:** Seamlessly delete episodes, split by indices/fractions, add/remove features, and merge multiple datasets.
-
-```python
-from lerobot.datasets.lerobot_dataset import LeRobotDataset
-
-# Load a dataset from the Hub
-dataset = LeRobotDataset("lerobot/aloha_mobile_cabinet")
-
-# Access data (automatically handles video decoding)
-episode_index=0
-print(f"{dataset[episode_index]['action'].shape=}\n")
-```
-
-Learn more about it in the [LeRobotDataset Documentation](https://huggingface.co/docs/lerobot/lerobot-dataset-v3)
-
-## SoTA Models
-
-LeRobot implements state-of-the-art policies in pure PyTorch, covering Imitation Learning, Reinforcement Learning, and Vision-Language-Action (VLA) models, with more coming soon. It also provides you with the tools to instrument and inspect your training process.
-
-<p align="center">
-  <img alt="Gr00t Architecture" src="./media/readme/VLA_architecture.jpg" width="640px">
-</p>
-
-Training a policy is as simple as running a script configuration:
+查找串口：
 
 ```bash
-lerobot-train \
-  --policy=act \
-  --dataset.repo_id=lerobot/aloha_mobile_cabinet
+lerobot-find-port
 ```
 
-| Category                   | Models                                                                                                                                                                                                                  |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Imitation Learning**     | [ACT](./docs/source/policy_act_README.md), [Diffusion](./docs/source/policy_diffusion_README.md), [VQ-BeT](./docs/source/policy_vqbet_README.md), [Multitask DiT Policy](./docs/source/policy_multi_task_dit_README.md) |
-| **Reinforcement Learning** | [HIL-SERL](./docs/source/hilserl.mdx), [TDMPC](./docs/source/policy_tdmpc_README.md) & QC-FQL (coming soon)                                                                                                             |
-| **VLAs Models**            | [Pi0Fast](./docs/source/pi0fast.mdx), [Pi0.5](./docs/source/pi05.mdx), [GR00T N1.5](./docs/source/policy_groot_README.md), [SmolVLA](./docs/source/policy_smolvla_README.md), [XVLA](./docs/source/xvla.mdx)            |
-
-Similarly to the hardware, you can easily implement your own policy & leverage LeRobot's data collection, training, and visualization tools, and share your model to the HF Hub
-
-For detailed policy setup guides, see the [Policy Documentation](https://huggingface.co/docs/lerobot/bring_your_own_policies).
-
-## Inference & Evaluation
-
-Evaluate your policies in simulation or on real hardware using the unified evaluation script. LeRobot supports standard benchmarks like **LIBERO**, **MetaWorld** and more to come.
+查看训练帮助：
 
 ```bash
-# Evaluate a policy on the LIBERO benchmark
-lerobot-eval \
-  --policy.path=lerobot/pi0_libero_finetuned \
-  --env.type=libero \
-  --env.task=libero_object \
-  --eval.n_episodes=10
+lerobot-train --help
 ```
 
-Learn how to implement your own simulation environment or benchmark and distribute it from the HF Hub by following the [EnvHub Documentation](https://huggingface.co/docs/lerobot/envhub)
+查看评估帮助：
 
-## Resources
-
-- **[Documentation](https://huggingface.co/docs/lerobot/index):** The complete guide to tutorials & API.
-- **[Chinese Tutorials: LeRobot+SO-ARM101中文教程-同济子豪兄](https://zihao-ai.feishu.cn/wiki/space/7589642043471924447)** Detailed doc for assembling, teleoperate, dataset, train, deploy. Verified by Seed Studio and 5 global hackathon players.
-- **[Discord](https://discord.gg/q8Dzzpym3f):** Join the `LeRobot` server to discuss with the community.
-- **[X](https://x.com/LeRobotHF):** Follow us on X to stay up-to-date with the latest developments.
-- **[Robot Learning Tutorial](https://huggingface.co/spaces/lerobot/robot-learning-tutorial):** A free, hands-on course to learn robot learning using LeRobot.
-
-## Citation
-
-If you use LeRobot in your project, please cite the GitHub repository to acknowledge the ongoing development and contributors:
-
-```bibtex
-@misc{cadene2024lerobot,
-    author = {Cadene, Remi and Alibert, Simon and Soare, Alexander and Gallouedec, Quentin and Zouitine, Adil and Palma, Steven and Kooijmans, Pepijn and Aractingi, Michel and Shukor, Mustafa and Aubakirova, Dana and Russi, Martino and Capuano, Francesco and Pascal, Caroline and Choghari, Jade and Moss, Jess and Wolf, Thomas},
-    title = {LeRobot: State-of-the-art Machine Learning for Real-World Robotics in Pytorch},
-    howpublished = "\url{https://github.com/huggingface/lerobot}",
-    year = {2024}
-}
+```bash
+lerobot-eval --help
 ```
 
-If you are referencing our research or the academic paper, please also cite our ICLR publication:
+## 常见问题
 
-<details>
-<summary><b>ICLR 2026 Paper</b></summary>
+### 1. 导入到了旧的 `site-packages/lerobot`
 
-```bibtex
-@inproceedings{cadenelerobot,
-  title={LeRobot: An Open-Source Library for End-to-End Robot Learning},
-  author={Cadene, Remi and Alibert, Simon and Capuano, Francesco and Aractingi, Michel and Zouitine, Adil and Kooijmans, Pepijn and Choghari, Jade and Russi, Martino and Pascal, Caroline and Palma, Steven and Shukor, Mustafa and Moss, Jess and Soare, Alexander and Aubakirova, Dana and Lhoest, Quentin and Gallou\'edec, Quentin and Wolf, Thomas},
-  booktitle={The Fourteenth International Conference on Learning Representations},
-  year={2026},
-  url={https://arxiv.org/abs/2602.22818}
-}
+重新执行 editable install，并确认：
+
+```bash
+python -c "import lerobot; print(lerobot.__file__)"
 ```
 
-</details>
+### 2. `xlerobot_2wheels` 导入时报 `zmq` 相关错误
 
-## Contribute
+安装：
 
-We welcome contributions from everyone in the community! To get started, please read our [CONTRIBUTING.md](https://github.com/huggingface/lerobot/blob/main/CONTRIBUTING.md) guide. Whether you're adding a new feature, improving documentation, or fixing a bug, your help and feedback are invaluable. We're incredibly excited about the future of open-source robotics and can't wait to work with you on what's next—thank you for your support!
+```bash
+python -m pip install pyzmq
+```
 
-<p align="center">
-  <img alt="SO101 Video" src="./media/readme/so100_video.webp" width="640px">
-</p>
+### 3. 电机扫描不到 ID
 
-<div align="center">
-<sub>Built by the <a href="https://huggingface.co/lerobot">LeRobot</a> team at <a href="https://huggingface.co">Hugging Face</a> with ❤️</sub>
-</div>
+优先检查：
+
+- 驱动是否正确
+- 电机总线是否上电
+- 串口是否接对
+
+在 Windows / HarmonyOS PC 场景下，如果你使用的是 CH343 类串口芯片，可能需要正确的 WCH 驱动。
+
+### 4. 退出时机械臂突然掉下去
+
+使用：
+
+- `examples/shield/4_xlerobot_2wheels_teleop_keyboard_safe_exit.py`
+
+## 上游与参考
+
+本仓库基于：
+
+- 上游 LeRobot：<https://github.com/huggingface/lerobot>
+- XLeRobot 软件文档：<https://xlerobot.readthedocs.io/zh-cn/latest/software/index.html>
+
+这个 fork 的目标不是替代上游 LeRobot，而是把 XLerobot 接入 LeRobot 体系，让实机控制、数据采集和后续开发放在同一个代码仓里持续演进。
