@@ -28,7 +28,6 @@ lerobot-find-cameras
 # NOTE(Steven): macOS cameras sometimes report different FPS at init time, not an issue here as we don't specify FPS when opening the cameras, but the information displayed might not be truthful.
 
 import argparse
-import concurrent.futures
 import logging
 import time
 from pathlib import Path
@@ -134,7 +133,7 @@ def save_image(
     camera_identifier: str | int,
     images_dir: Path,
     camera_type: str,
-):
+) -> bool:
     """
     Saves a single image to disk using Pillow. Handles color conversion if necessary.
     """
@@ -149,8 +148,10 @@ def save_image(
         path.parent.mkdir(parents=True, exist_ok=True)
         img.save(str(path))
         logger.info(f"Saved image: {path}")
+        return True
     except Exception as e:
         logger.error(f"Failed to save image for camera {camera_identifier} (type {camera_type}): {e}")
+        return False
 
 
 def create_camera_instance(cam_meta: dict[str, Any]) -> dict[str, Any] | None:
@@ -191,7 +192,7 @@ def create_camera_instance(cam_meta: dict[str, Any]) -> dict[str, Any] | None:
 
 def process_camera_image(
     cam_dict: dict[str, Any], output_dir: Path, current_time: float
-) -> concurrent.futures.Future | None:
+) -> bool:
     """Capture and process an image from a single camera."""
     cam = cam_dict["instance"]
     meta = cam_dict["meta"]
@@ -213,7 +214,7 @@ def process_camera_image(
         )
     except Exception as e:
         logger.error(f"Error reading from {cam_type_str} camera {cam_id_str}: {e}")
-    return None
+    return False
 
 
 def cleanup_cameras(cameras_to_use: list[dict[str, Any]]):
@@ -225,6 +226,30 @@ def cleanup_cameras(cameras_to_use: list[dict[str, Any]]):
                 cam_dict["instance"].disconnect()
         except Exception as e:
             logger.error(f"Error disconnecting camera {cam_dict['meta'].get('id')}: {e}")
+
+
+def capture_camera_sequentially(
+    cam_dict: dict[str, Any],
+    output_dir: Path,
+    record_time_s: float,
+) -> int:
+    """Capture images from a single connected camera before moving to the next one."""
+    meta = cam_dict["meta"]
+    cam_type_str = str(meta.get("type", "unknown"))
+    cam_id_str = str(meta.get("id", "unknown"))
+    save_count = 0
+    start_time = time.perf_counter()
+
+    logger.info(f"Capturing from {cam_type_str} camera {cam_id_str} sequentially for {record_time_s} seconds.")
+    while time.perf_counter() - start_time < record_time_s:
+        current_capture_time = time.perf_counter()
+        if process_camera_image(cam_dict, output_dir, current_capture_time):
+            save_count += 1
+
+    logger.info(
+        f"Finished sequential capture for {cam_type_str} camera {cam_id_str} with {save_count} successful save(s)."
+    )
+    return save_count
 
 
 def save_images_from_all_cameras(
@@ -250,40 +275,39 @@ def save_images_from_all_cameras(
         logger.warning("No cameras detected matching the criteria. Cannot save images.")
         return
 
-    cameras_to_use = []
-    for cam_meta in all_camera_metadata:
-        camera_instance = create_camera_instance(cam_meta)
-        if camera_instance:
-            cameras_to_use.append(camera_instance)
+    connected_camera_count = 0
+    successful_capture_count = 0
 
-    if not cameras_to_use:
-        logger.warning("No cameras could be connected. Aborting image save.")
-        return
+    logger.info(
+        "Starting sequential image capture. Each detected camera will be opened, captured, and closed individually."
+    )
+    try:
+        for cam_meta in all_camera_metadata:
+            camera_instance = create_camera_instance(cam_meta)
+            if camera_instance is None:
+                continue
 
-    logger.info(f"Starting image capture for {record_time_s} seconds from {len(cameras_to_use)} cameras.")
-    start_time = time.perf_counter()
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(cameras_to_use) * 2) as executor:
-        try:
-            while time.perf_counter() - start_time < record_time_s:
-                futures = []
-                current_capture_time = time.perf_counter()
-
-                for cam_dict in cameras_to_use:
-                    future = process_camera_image(cam_dict, output_dir, current_capture_time)
-                    if future:
-                        futures.append(future)
-
-                if futures:
-                    concurrent.futures.wait(futures)
-
-        except KeyboardInterrupt:
-            logger.info("Capture interrupted by user.")
-        finally:
-            print("\nFinalizing image saving...")
-            executor.shutdown(wait=True)
-            cleanup_cameras(cameras_to_use)
-            print(f"Image capture finished. Images saved to {output_dir}")
+            connected_camera_count += 1
+            try:
+                successful_capture_count += capture_camera_sequentially(
+                    camera_instance,
+                    output_dir,
+                    record_time_s,
+                )
+            finally:
+                cleanup_cameras([camera_instance])
+    except KeyboardInterrupt:
+        logger.info("Capture interrupted by user.")
+    finally:
+        print("\nFinalizing image saving...")
+        if connected_camera_count == 0:
+            logger.warning("No cameras could be connected. Aborting image save.")
+        else:
+            logger.info(
+                f"Sequential capture finished. Connected cameras: {connected_camera_count}, "
+                f"successful saves: {successful_capture_count}."
+            )
+        print(f"Image capture finished. Images saved to {output_dir}")
 
 
 def main():
