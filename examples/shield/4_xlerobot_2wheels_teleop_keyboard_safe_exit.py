@@ -1,3 +1,12 @@
+from pathlib import Path
+import sys
+
+# Allow running this example directly from the repo without requiring an editable install.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SRC_DIR = REPO_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
 # To Run on the host
 '''python
 PYTHONPATH=src python -m lerobot.robots.xlerobot_2wheels.xlerobot_2wheels_host --robot.id=my_xlerobot_2wheels
@@ -9,16 +18,31 @@ PYTHONPATH=src python -m examples.xlerobot_2wheels.teleoperate_Keyboard
 '''
 
 import time
-import numpy as np
 import math
 
-from lerobot.robots.xlerobot_2wheels import XLerobot2WheelsClient, XLerobot2WheelsClientConfig, XLerobot2WheelsConfig, XLerobot2Wheels
-from lerobot.utils.errors import DeviceNotConnectedError
-# from lerobot.utils.robot_utils import busy_wait
-from lerobot.utils.robot_utils import precise_sleep
-from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
-from lerobot.model.SO101Robot import SO101Kinematics
-from lerobot.teleoperators.keyboard.teleop_keyboard import KeyboardTeleop, KeyboardTeleopConfig
+try:
+    import numpy as np
+    from lerobot.robots.xlerobot_2wheels import XLerobot2WheelsClient, XLerobot2WheelsClientConfig, XLerobot2WheelsConfig, XLerobot2Wheels
+    from lerobot.utils.errors import DeviceNotConnectedError
+    # from lerobot.utils.robot_utils import busy_wait
+    from lerobot.utils.robot_utils import precise_sleep
+    from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
+    from lerobot.model.SO101Robot import SO101Kinematics
+    from lerobot.teleoperators.keyboard.teleop_keyboard import KeyboardTeleop, KeyboardTeleopConfig
+except ModuleNotFoundError as exc:
+    missing_module = exc.name or "unknown module"
+    if missing_module.startswith("lerobot"):
+        raise
+    raise SystemExit(
+        "Missing Python dependency for this script: "
+        f"{missing_module}\n"
+        "Use the prepared environment or install the project dependencies first.\n"
+        "Recommended command:\n"
+        r"  C:\softwares\miniconda\envs\lerobot\python.exe .\examples\shield\4_xlerobot_2wheels_teleop_keyboard_safe_exit.py"
+        "\n"
+        "Or install into the current environment:\n"
+        r"  python -m pip install -e "".[feetech]"" pyzmq"
+    ) from exc
 
 # Base speed control parameters - adjustable slopes
 BASE_ACCELERATION_RATE = 10.0  # acceleration slope (speed/second)

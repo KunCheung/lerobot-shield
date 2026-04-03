@@ -29,6 +29,7 @@ lerobot-find-cameras
 
 import argparse
 import logging
+import platform
 import time
 from pathlib import Path
 from typing import Any
@@ -36,13 +37,93 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
-from lerobot.cameras.configs import ColorMode
+from lerobot.cameras.configs import ColorMode, Cv2Backends
 from lerobot.cameras.opencv.camera_opencv import OpenCVCamera
 from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig
 from lerobot.cameras.realsense.camera_realsense import RealSenseCamera
 from lerobot.cameras.realsense.configuration_realsense import RealSenseCameraConfig
 
 logger = logging.getLogger(__name__)
+WHITE_MEAN_THRESHOLD = 250.0
+WHITE_STD_THRESHOLD = 2.0
+BLACK_MEAN_THRESHOLD = 5.0
+BLACK_STD_THRESHOLD = 2.0
+
+
+def is_blank_frame(img_array: np.ndarray) -> tuple[bool, str]:
+    """Detect uniformly white or black frames that usually indicate a bad capture path."""
+    mean_value = float(img_array.mean())
+    std_value = float(img_array.std())
+    min_value = int(img_array.min())
+    max_value = int(img_array.max())
+
+    is_white = mean_value >= WHITE_MEAN_THRESHOLD and std_value <= WHITE_STD_THRESHOLD
+    is_black = mean_value <= BLACK_MEAN_THRESHOLD and std_value <= BLACK_STD_THRESHOLD
+
+    if is_white:
+        return True, (
+            f"blank-white frame detected (mean={mean_value:.1f}, std={std_value:.1f}, "
+            f"min={min_value}, max={max_value})"
+        )
+    if is_black:
+        return True, (
+            f"blank-black frame detected (mean={mean_value:.1f}, std={std_value:.1f}, "
+            f"min={min_value}, max={max_value})"
+        )
+    return False, (
+        f"valid frame stats (mean={mean_value:.1f}, std={std_value:.1f}, min={min_value}, max={max_value})"
+    )
+
+
+def build_opencv_candidate_configs(cam_id: str | int) -> list[OpenCVCameraConfig]:
+    """Build candidate OpenCV configs to avoid blank frames on Windows."""
+    configs = [
+        OpenCVCameraConfig(index_or_path=cam_id, color_mode=ColorMode.RGB, backend=Cv2Backends.ANY),
+    ]
+
+    if platform.system() == "Windows" and isinstance(cam_id, int):
+        configs.extend(
+            [
+                OpenCVCameraConfig(index_or_path=cam_id, color_mode=ColorMode.RGB, backend=Cv2Backends.MSMF),
+                OpenCVCameraConfig(
+                    index_or_path=cam_id,
+                    color_mode=ColorMode.RGB,
+                    backend=Cv2Backends.MSMF,
+                    fourcc="MJPG",
+                ),
+                OpenCVCameraConfig(
+                    index_or_path=cam_id,
+                    color_mode=ColorMode.RGB,
+                    backend=Cv2Backends.MSMF,
+                    fourcc="YUY2",
+                ),
+                OpenCVCameraConfig(index_or_path=cam_id, color_mode=ColorMode.RGB, backend=Cv2Backends.DSHOW),
+                OpenCVCameraConfig(
+                    index_or_path=cam_id,
+                    color_mode=ColorMode.RGB,
+                    backend=Cv2Backends.DSHOW,
+                    fourcc="MJPG",
+                ),
+                OpenCVCameraConfig(
+                    index_or_path=cam_id,
+                    color_mode=ColorMode.RGB,
+                    backend=Cv2Backends.DSHOW,
+                    fourcc="YUY2",
+                ),
+            ]
+        )
+
+    return configs
+
+
+def remove_previous_captures(output_dir: Path) -> int:
+    """Delete stale capture files so each run only reflects fresh results."""
+    removed = 0
+    for pattern in ("opencv_*.png", "realsense_*.png"):
+        for path in output_dir.glob(pattern):
+            path.unlink(missing_ok=True)
+            removed += 1
+    return removed
 
 
 def find_all_opencv_cameras() -> list[dict[str, Any]]:
@@ -154,6 +235,44 @@ def save_image(
         return False
 
 
+def create_validated_opencv_camera_instance(cam_meta: dict[str, Any]) -> dict[str, Any] | None:
+    """Create an OpenCV camera instance and reject configs that produce blank validation frames."""
+    cam_id = cam_meta.get("id")
+
+    for cv_config in build_opencv_candidate_configs(cam_id):
+        instance = OpenCVCamera(cv_config)
+        backend_label = getattr(cv_config.backend, "name", str(cv_config.backend))
+        fourcc_label = cv_config.fourcc or "default"
+
+        try:
+            logger.info(
+                f"Connecting to OpenCV camera {cam_id} with backend={backend_label}, fourcc={fourcc_label}..."
+            )
+            instance.connect(warmup=True)
+            validation_frame = instance.read()
+            is_blank, stats_message = is_blank_frame(validation_frame)
+            if is_blank:
+                logger.warning(f"OpenCV camera {cam_id} rejected for {backend_label}/{fourcc_label}: {stats_message}")
+                instance.disconnect()
+                continue
+
+            logger.info(f"OpenCV camera {cam_id} accepted for {backend_label}/{fourcc_label}: {stats_message}")
+
+            meta_with_config = dict(cam_meta)
+            meta_with_config["selected_backend"] = backend_label
+            meta_with_config["selected_fourcc"] = fourcc_label
+            return {"instance": instance, "meta": meta_with_config}
+        except Exception as e:
+            logger.warning(
+                f"OpenCV camera {cam_id} failed with backend={backend_label}, fourcc={fourcc_label}: {e}"
+            )
+            if instance.is_connected:
+                instance.disconnect()
+
+    logger.error(f"Failed to find a usable OpenCV capture configuration for camera {cam_id}.")
+    return None
+
+
 def create_camera_instance(cam_meta: dict[str, Any]) -> dict[str, Any] | None:
     """Create and connect to a camera instance based on metadata."""
     cam_type = cam_meta.get("type")
@@ -164,11 +283,7 @@ def create_camera_instance(cam_meta: dict[str, Any]) -> dict[str, Any] | None:
 
     try:
         if cam_type == "OpenCV":
-            cv_config = OpenCVCameraConfig(
-                index_or_path=cam_id,
-                color_mode=ColorMode.RGB,
-            )
-            instance = OpenCVCamera(cv_config)
+            return create_validated_opencv_camera_instance(cam_meta)
         elif cam_type == "RealSense":
             rs_config = RealSenseCameraConfig(
                 serial_number_or_name=cam_id,
@@ -201,6 +316,12 @@ def process_camera_image(
 
     try:
         image_data = cam.read()
+        is_blank, stats_message = is_blank_frame(image_data)
+        if is_blank:
+            logger.warning(
+                f"Skipping save for {cam_type_str} camera {cam_id_str} at time {current_time:.2f}s: {stats_message}"
+            )
+            return False
 
         return save_image(
             image_data,
@@ -237,10 +358,15 @@ def capture_camera_sequentially(
     meta = cam_dict["meta"]
     cam_type_str = str(meta.get("type", "unknown"))
     cam_id_str = str(meta.get("id", "unknown"))
+    backend_label = str(meta.get("selected_backend", "default"))
+    fourcc_label = str(meta.get("selected_fourcc", "default"))
     save_count = 0
     start_time = time.perf_counter()
 
-    logger.info(f"Capturing from {cam_type_str} camera {cam_id_str} sequentially for {record_time_s} seconds.")
+    logger.info(
+        f"Capturing from {cam_type_str} camera {cam_id_str} sequentially for {record_time_s} seconds "
+        f"(backend={backend_label}, fourcc={fourcc_label})."
+    )
     while time.perf_counter() - start_time < record_time_s:
         current_capture_time = time.perf_counter()
         if process_camera_image(cam_dict, output_dir, current_capture_time):
@@ -269,6 +395,9 @@ def save_images_from_all_cameras(
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Saving images to {output_dir}")
+    removed_count = remove_previous_captures(output_dir)
+    if removed_count > 0:
+        print(f"Removed {removed_count} previous capture file(s) from {output_dir}")
     all_camera_metadata = find_and_print_cameras(camera_type_filter=camera_type)
 
     if not all_camera_metadata:
@@ -279,7 +408,7 @@ def save_images_from_all_cameras(
     successful_capture_count = 0
 
     logger.info(
-        "Starting sequential image capture. Each detected camera will be opened, captured, and closed individually."
+        "Starting sequential image capture. Each detected camera will be opened, captured, validated, and closed individually."
     )
     try:
         for cam_meta in all_camera_metadata:
@@ -302,15 +431,22 @@ def save_images_from_all_cameras(
         print("\nFinalizing image saving...")
         if connected_camera_count == 0:
             logger.warning("No cameras could be connected. Aborting image save.")
+            print("Connected cameras: 0")
+            print("Successful saves: 0")
         else:
             logger.info(
                 f"Sequential capture finished. Connected cameras: {connected_camera_count}, "
                 f"successful saves: {successful_capture_count}."
             )
+            print(f"Connected cameras: {connected_camera_count}")
+            print(f"Successful saves: {successful_capture_count}")
+            if successful_capture_count == 0:
+                print("No fresh valid images were saved in this run.")
         print(f"Image capture finished. Images saved to {output_dir}")
 
 
 def main():
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
     parser = argparse.ArgumentParser(
         description="Unified camera utility script for listing cameras and capturing images."
     )

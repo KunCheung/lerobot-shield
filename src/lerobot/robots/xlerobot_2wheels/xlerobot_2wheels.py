@@ -291,45 +291,57 @@ class XLerobot2Wheels(Robot):
         self.calibration = {**calibration_left, **calibration_right}
         self._save_calibration()
         print("Calibration saved to", self.calibration_fpath)
-        
+
+    def _write_motor_setting(
+        self,
+        bus: FeetechMotorsBus,
+        motor_name: str,
+        register: str,
+        value: int,
+        *,
+        num_retry: int = 3,
+        required: bool = True,
+    ) -> None:
+        try:
+            bus.write(register, motor_name, value, num_retry=num_retry)
+        except Exception as exc:
+            if required:
+                raise
+            logger.warning(
+                "Non-fatal motor config write failure on %s (%s=%s): %s",
+                motor_name,
+                register,
+                value,
+                exc,
+            )
+
+    def _configure_position_motors(self, bus: FeetechMotorsBus, motor_names: list[str]) -> None:
+        for name in motor_names:
+            self._write_motor_setting(bus, name, "Operating_Mode", OperatingMode.POSITION.value)
+            # Lower P to reduce shakiness while keeping motion responsive.
+            self._write_motor_setting(bus, name, "P_Coefficient", 16, required=False)
+            self._write_motor_setting(bus, name, "I_Coefficient", 0, required=False)
+            self._write_motor_setting(bus, name, "D_Coefficient", 43, required=False)
+
+    def _configure_velocity_motors(self, bus: FeetechMotorsBus, motor_names: list[str]) -> None:
+        for name in motor_names:
+            self._write_motor_setting(bus, name, "Operating_Mode", OperatingMode.VELOCITY.value)
 
     def configure(self):
         # Set-up arm actuators (position mode)
         # We assume that at connection time, arm is in a rest position,
-        # and torque can be safely disabled to run calibration        
+        # and torque can be safely disabled to run calibration.
         self.bus1.disable_torque()
+        self.bus1.configure_motors()
+
         self.bus2.disable_torque()
         self.bus2.configure_motors()
-        self.bus2.configure_motors()
-        
-        for name in self.left_arm_motors:
-            self.bus1.write("Operating_Mode", name, OperatingMode.POSITION.value)
-            # Set P_Coefficient to lower value to avoid shakiness (Default is 32)
-            self.bus1.write("P_Coefficient", name, 16)
-            # Set I_Coefficient and D_Coefficient to default value 0 and 32
-            self.bus1.write("I_Coefficient", name, 0)
-            self.bus1.write("D_Coefficient", name, 43)
-        
-        for name in self.head_motors:
-            self.bus1.write("Operating_Mode", name, OperatingMode.POSITION.value)
-            # Set P_Coefficient to lower value to avoid shakiness (Default is 32)
-            self.bus1.write("P_Coefficient", name, 16)
-            # Set I_Coefficient and D_Coefficient to default value 0 and 32
-            self.bus1.write("I_Coefficient", name, 0)
-            self.bus1.write("D_Coefficient", name, 43)
-        
-        for name in self.right_arm_motors:
-            self.bus2.write("Operating_Mode", name, OperatingMode.POSITION.value)
-            # Set P_Coefficient to lower value to avoid shakiness (Default is 32)
-            self.bus2.write("P_Coefficient", name, 16)
-            # Set I_Coefficient and D_Coefficient to default value 0 and 32
-            self.bus2.write("I_Coefficient", name, 0)
-            self.bus2.write("D_Coefficient", name, 43)
-        
-        for name in self.base_motors:
-            self.bus2.write("Operating_Mode", name, OperatingMode.VELOCITY.value)
-        
-        
+
+        self._configure_position_motors(self.bus1, self.left_arm_motors)
+        self._configure_position_motors(self.bus1, self.head_motors)
+        self._configure_position_motors(self.bus2, self.right_arm_motors)
+        self._configure_velocity_motors(self.bus2, self.base_motors)
+
         self.bus1.enable_torque()
         self.bus2.enable_torque()
         
