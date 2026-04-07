@@ -15,6 +15,7 @@
 from .xlerobot_2wheels import XLerobot2Wheels
 from .xlerobot_2wheels_client import XLerobot2WheelsClient
 from .xlerobot_2wheels_host import XLerobot2WheelsHost
+from .robocrew_adapter import TwoWheelsServoAdapter
 from .config_xlerobot_2wheels import (
     XLerobot2WheelsConfig,
     XLerobot2WheelsClientConfig,
@@ -25,6 +26,7 @@ __all__ = [
     "XLerobot2Wheels",
     "XLerobot2WheelsClient", 
     "XLerobot2WheelsHost",
+    "TwoWheelsServoAdapter",
     "XLerobot2WheelsConfig",
     "XLerobot2WheelsClientConfig",
     "XLerobot2WheelsHostConfig",

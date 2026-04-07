@@ -156,7 +156,7 @@ class Robot(abc.ABC):
             fpath (Path | None): Optional path to the calibration file. Defaults to `self.calibration_fpath`.
         """
         fpath = self.calibration_fpath if fpath is None else fpath
-        with open(fpath) as f, draccus.config_type("json"):
+        with open(fpath, encoding="utf-8-sig") as f, draccus.config_type("json"):
             self.calibration = draccus.load(dict[str, MotorCalibration], f)
 
     def _save_calibration(self, fpath: Path | None = None) -> None:
@@ -167,7 +167,7 @@ class Robot(abc.ABC):
             fpath (Path | None): Optional path to save the calibration file. Defaults to `self.calibration_fpath`.
         """
         fpath = self.calibration_fpath if fpath is None else fpath
-        with open(fpath, "w") as f, draccus.config_type("json"):
+        with open(fpath, "w", encoding="utf-8") as f, draccus.config_type("json"):
             draccus.dump(self.calibration, f, indent=4)
 
     @abc.abstractmethod

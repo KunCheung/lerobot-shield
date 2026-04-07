@@ -397,7 +397,11 @@ def main():
     # robot = XLerobotClient(robot_config)    
 
     # For local/wired connection
-    robot_config = XLerobotConfig()
+    robot_config = XLerobot2WheelsConfig(
+        id=robot_name,
+        port1="COM5",
+        port2="COM4"
+    )
     robot = XLerobot(robot_config)
     
     try:

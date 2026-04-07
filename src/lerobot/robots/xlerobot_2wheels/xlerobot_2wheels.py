@@ -214,6 +214,12 @@ class XLerobot2Wheels(Robot):
         self.configure()
         logger.info(f"{self} connected.")
 
+    def _preserved_drive_mode(self, motor_name: str, default: int = 0) -> int:
+        calibration = self.calibration.get(motor_name)
+        if calibration is None:
+            return default
+        return int(getattr(calibration, "drive_mode", default))
+
     @property
     def is_calibrated(self) -> bool:
         return self.bus1.is_calibrated and self.bus2.is_calibrated
@@ -279,9 +285,10 @@ class XLerobot2Wheels(Robot):
         calibration_right = {}
         
         for name, motor in self.bus2.motors.items():
+            drive_mode = self._preserved_drive_mode(name) if name in self.base_motors else 0
             calibration_right[name] = MotorCalibration(
                 id=motor.id,
-                drive_mode=0,
+                drive_mode=drive_mode,
                 homing_offset=homing_offsets[name],
                 range_min=range_mins[name],
                 range_max=range_maxes[name],
@@ -515,6 +522,15 @@ class XLerobot2Wheels(Robot):
             "theta.vel": theta_cmd,
         }
 
+    def _apply_base_velocity_drive_mode(self, base_wheel_vel: dict[str, int]) -> dict[str, int]:
+        # Goal/Present_Velocity bypass position normalization, so apply wheel inversion here.
+        corrected_velocities = {}
+        for motor_name, raw_velocity in base_wheel_vel.items():
+            calibration = self.calibration.get(motor_name)
+            drive_mode = int(getattr(calibration, "drive_mode", 0)) if calibration is not None else 0
+            corrected_velocities[motor_name] = -raw_velocity if drive_mode else raw_velocity
+        return corrected_velocities
+
     def get_observation(self) -> dict[str, Any]:
         if not self.is_connected:
             raise DeviceNotConnectedError(f"{self} is not connected.")
@@ -525,6 +541,7 @@ class XLerobot2Wheels(Robot):
         right_arm_pos = self.bus2.sync_read("Present_Position", self.right_arm_motors)
         head_pos = self.bus1.sync_read("Present_Position", self.head_motors)
         base_wheel_vel = self.bus2.sync_read("Present_Velocity", self.base_motors)
+        base_wheel_vel = self._apply_base_velocity_drive_mode(base_wheel_vel)
         
         base_vel = self._wheel_raw_to_body(
             base_wheel_vel["base_left_wheel"],
@@ -573,6 +590,7 @@ class XLerobot2Wheels(Robot):
             base_goal_vel.get("x.vel", 0.0),
             base_goal_vel.get("theta.vel", 0.0),
         )
+        base_wheel_goal_vel = self._apply_base_velocity_drive_mode(base_wheel_goal_vel)
         
         
         if self.config.max_relative_target is not None:
