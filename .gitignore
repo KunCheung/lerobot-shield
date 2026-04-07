@@ -48,6 +48,7 @@ MANIFEST
 lib/
 lib64/
 
+
 # PyInstaller
 *.manifest
 *.spec
