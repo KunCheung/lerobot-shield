@@ -47,6 +47,7 @@ develop-eggs/
 MANIFEST
 lib/
 lib64/
+img_
 
 
 # PyInstaller
@@ -167,6 +168,7 @@ wandb/
 # Data folders
 data/
 outputs/
+tmp_images/
 
 # Translations
 *.mo
