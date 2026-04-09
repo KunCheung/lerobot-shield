@@ -5,20 +5,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-try:
-    from dotenv import load_dotenv
-except ImportError:
-    load_dotenv = None
+from dotenv import load_dotenv
+import cv2
+import numpy as np
 
-try:
-    import cv2
-except ImportError:
-    cv2 = None
-
-try:
-    import numpy as np
-except ImportError:
-    np = None
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -59,14 +49,8 @@ if LOCAL_LEROBOT_INIT_PATH != EXPECTED_LEROBOT_INIT_PATH:
 if load_dotenv is not None and DOTENV_PATH.exists():
     load_dotenv(DOTENV_PATH, override=False)
 
-kimi_api_key = os.getenv("KIMI_API_KEY")
-moonshot_api_key = os.getenv("MOONSHOT_API_KEY")
-if kimi_api_key and not moonshot_api_key:
-    moonshot_api_key = kimi_api_key
-    os.environ["MOONSHOT_API_KEY"] = moonshot_api_key
-if not moonshot_api_key:
-    raise RuntimeError(f"Missing KIMI_API_KEY or MOONSHOT_API_KEY in {DOTENV_PATH}")
 
+os.environ["MOONSHOT_API_KEY"] = os.getenv("MOONSHOT_API_KEY")
 os.environ.setdefault("OPENAI_API_KEY", moonshot_api_key)
 os.environ.setdefault("OPENAI_BASE_URL", MOONSHOT_BASE_URL)
 
