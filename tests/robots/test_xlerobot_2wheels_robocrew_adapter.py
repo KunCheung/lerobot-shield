@@ -40,7 +40,12 @@ class FakeRobot:
         self.is_connected = False
 
 
-def make_adapter(monkeypatch: pytest.MonkeyPatch, *, connected: bool = True):
+def make_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    connected: bool = True,
+    max_distance_per_step_m: float | None = None,
+):
     sleep_calls: list[float] = []
     monkeypatch.setattr(robocrew_adapter_module.time, "sleep", lambda duration: sleep_calls.append(duration))
     robot = FakeRobot(connected=connected)
@@ -49,6 +54,7 @@ def make_adapter(monkeypatch: pytest.MonkeyPatch, *, connected: bool = True):
         right_arm_wheel_usb="COM4",
         linear_speed_mps=0.1,
         angular_speed_dps=30.0,
+        max_distance_per_step_m=max_distance_per_step_m,
     )
     return adapter, robot, sleep_calls
 
@@ -116,6 +122,17 @@ def test_negative_inputs_are_normalized_by_abs(monkeypatch: pytest.MonkeyPatch) 
     ]
     assert sleep_calls == [5.0, 3.0]
     assert robot.stop_base_calls == 2
+
+
+def test_forward_distance_is_clipped_per_step(monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter, robot, sleep_calls = make_adapter(monkeypatch, max_distance_per_step_m=0.2)
+
+    executed_distance = adapter.go_forward(2.0)
+
+    assert executed_distance == pytest.approx(0.2)
+    assert robot.actions == [{"x.vel": 0.1, "theta.vel": 0.0}]
+    assert sleep_calls == [2.0]
+    assert robot.stop_base_calls == 1
 
 
 def test_disconnect_stops_and_disconnects_connected_robot(monkeypatch: pytest.MonkeyPatch) -> None:

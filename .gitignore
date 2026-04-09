@@ -47,7 +47,6 @@ develop-eggs/
 MANIFEST
 lib/
 lib64/
-img_
 
 
 # PyInstaller

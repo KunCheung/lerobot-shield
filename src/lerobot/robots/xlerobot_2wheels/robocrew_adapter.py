@@ -35,6 +35,7 @@ class TwoWheelsServoAdapter:
         right_arm_wheel_usb: str,
         linear_speed_mps: float,
         angular_speed_dps: float,
+        max_distance_per_step_m: float | None = None,
     ) -> None:
         self.robot = robot
         self.right_arm_wheel_usb = right_arm_wheel_usb
@@ -42,32 +43,83 @@ class TwoWheelsServoAdapter:
         self.left_arm_head_usb = None
         self.linear_speed_mps = linear_speed_mps
         self.angular_speed_dps = angular_speed_dps
+        self.max_distance_per_step_m = (
+            abs(float(max_distance_per_step_m)) if max_distance_per_step_m is not None else None
+        )
 
     def _run_for_duration(self, *, x_vel: float = 0.0, theta_vel: float = 0.0, duration_s: float) -> None:
         if duration_s <= 0:
             return
 
+        print(f"[Tool Exec] command x.vel={x_vel:.2f} theta.vel={theta_vel:.2f} duration_s={duration_s:.2f}")
         try:
             self.robot.send_action({"x.vel": x_vel, "theta.vel": theta_vel})
             time.sleep(duration_s)
         finally:
             self.robot.stop_base()
 
-    def go_forward(self, meters: float) -> None:
-        distance = abs(float(meters))
-        self._run_for_duration(x_vel=self.linear_speed_mps, duration_s=distance / self.linear_speed_mps)
+    def _clip_step_distance(self, distance: float) -> float:
+        if self.max_distance_per_step_m is None:
+            return distance
+        return min(distance, self.max_distance_per_step_m)
 
-    def go_backward(self, meters: float) -> None:
-        distance = abs(float(meters))
-        self._run_for_duration(x_vel=-self.linear_speed_mps, duration_s=distance / self.linear_speed_mps)
+    def go_forward(self, meters: float) -> float:
+        requested_meters = float(meters)
+        requested_distance = abs(requested_meters)
+        distance = self._clip_step_distance(requested_distance)
+        duration_s = distance / self.linear_speed_mps
+        print(
+            "[Tool Exec] go_forward "
+            f"requested_meters={requested_meters:.2f} meters={distance:.2f} "
+            f"speed_mps={self.linear_speed_mps:.2f} duration_s={duration_s:.2f}"
+        )
+        if distance < requested_distance:
+            print(
+                "[Tool Exec] go_forward clipped "
+                f"requested_meters={requested_distance:.2f} max_step_m={self.max_distance_per_step_m:.2f}"
+            )
+        self._run_for_duration(x_vel=self.linear_speed_mps, duration_s=duration_s)
+        return distance
+
+    def go_backward(self, meters: float) -> float:
+        requested_meters = float(meters)
+        requested_distance = abs(requested_meters)
+        distance = self._clip_step_distance(requested_distance)
+        duration_s = distance / self.linear_speed_mps
+        print(
+            "[Tool Exec] go_backward "
+            f"requested_meters={requested_meters:.2f} meters={distance:.2f} "
+            f"speed_mps={self.linear_speed_mps:.2f} duration_s={duration_s:.2f}"
+        )
+        if distance < requested_distance:
+            print(
+                "[Tool Exec] go_backward clipped "
+                f"requested_meters={requested_distance:.2f} max_step_m={self.max_distance_per_step_m:.2f}"
+            )
+        self._run_for_duration(x_vel=-self.linear_speed_mps, duration_s=duration_s)
+        return distance
 
     def turn_left(self, degrees: float) -> None:
-        angle = abs(float(degrees))
-        self._run_for_duration(theta_vel=self.angular_speed_dps, duration_s=angle / self.angular_speed_dps)
+        requested_degrees = float(degrees)
+        angle = abs(requested_degrees)
+        duration_s = angle / self.angular_speed_dps
+        print(
+            "[Tool Exec] turn_left "
+            f"requested_degrees={requested_degrees:.2f} degrees={angle:.2f} "
+            f"angular_speed_dps={self.angular_speed_dps:.2f} duration_s={duration_s:.2f}"
+        )
+        self._run_for_duration(theta_vel=self.angular_speed_dps, duration_s=duration_s)
 
     def turn_right(self, degrees: float) -> None:
-        angle = abs(float(degrees))
-        self._run_for_duration(theta_vel=-self.angular_speed_dps, duration_s=angle / self.angular_speed_dps)
+        requested_degrees = float(degrees)
+        angle = abs(requested_degrees)
+        duration_s = angle / self.angular_speed_dps
+        print(
+            "[Tool Exec] turn_right "
+            f"requested_degrees={requested_degrees:.2f} degrees={angle:.2f} "
+            f"angular_speed_dps={self.angular_speed_dps:.2f} duration_s={duration_s:.2f}"
+        )
+        self._run_for_duration(theta_vel=-self.angular_speed_dps, duration_s=duration_s)
 
     def disconnect(self) -> None:
         try:
