@@ -32,8 +32,12 @@
   - 原始 XLerobot 键盘遥操作
 - `examples/4_xlerobot_2wheels_teleop_keyboard.py`
   - 两轮差速版键盘遥操作
-- `examples/shield/4_xlerobot_2wheels_teleop_keyboard_safe_exit.py`
+- `examples/shield/0_xlerobot_2wheels_teleop_keyboard_safe_exit.py`
   - 带安全退出流程的两轮差速版键盘遥操作
+- `examples/shield/1_move_to_person_judge_by_llm.py`
+  - 使用多模态大模型做“朝人靠近”决策
+- `examples/shield/2_move_to_person_judge_by_cv.py`
+  - 使用本地 OpenCV 检测做“朝人靠近”闭环测试
 
 ## 安装
 
@@ -152,7 +156,7 @@ python ./examples/4_xlerobot_2wheels_teleop_keyboard.py
 运行：
 
 ```bash
-python ./examples/shield/4_xlerobot_2wheels_teleop_keyboard_safe_exit.py
+python ./examples/shield/0_xlerobot_2wheels_teleop_keyboard_safe_exit.py
 ```
 
 这个版本适合两轮差速机器人，因为它在退出时做了受控处理：
@@ -164,7 +168,44 @@ python ./examples/shield/4_xlerobot_2wheels_teleop_keyboard_safe_exit.py
 
 如果你担心原始脚本退出时手臂直接下坠，优先使用这个版本。
 
-### 5. Host / Client 网络模式
+### 5. Shield 人体靠近示例
+
+`examples/shield` 目录下现在有两种“朝人靠近”的实验脚本：
+
+- `1_move_to_person_judge_by_llm.py`
+  - 每轮拍图后把图发给多模态大模型，由模型决定是否转向、前进或停止。
+  - 优点是语义判断能力强；缺点是每轮都要等待模型返回，速度会明显慢一些。
+- `2_move_to_person_judge_by_cv.py`
+  - 完全不调用 LLM，使用本地 OpenCV 的人体 / 上半身 / 人脸检测做闭环控制。
+  - 优点是响应快、依赖少，适合先做“能不能稳定朝人靠近”的本地验证。
+
+运行 LLM 版本前，先在 `examples/shield/.env` 中配置模型访问参数。例如：
+
+```env
+MOONSHOT_API_KEY=your_api_key
+```
+
+运行 LLM 版本：
+
+```bash
+python ./examples/shield/1_move_to_person_judge_by_llm.py
+```
+
+运行 CV 版本：
+
+```bash
+python ./examples/shield/2_move_to_person_judge_by_cv.py
+```
+
+使用 CV 版本时建议先检查脚本顶部配置：
+
+- `DRY_RUN=True` 时只显示检测和决策结果，不会真的驱动底盘
+- `DRY_RUN=False` 时才会连接底盘并执行转向 / 前进
+- `STOP_HEIGHT_RATIO` 越大，机器人会停得越近
+
+如果你只是想先确认相机里能不能稳定识别人，优先从 `2_move_to_person_judge_by_cv.py` 开始。
+
+### 6. Host / Client 网络模式
 
 如果电机连接在另一台电脑上，可以把那台电脑作为 host。
 
@@ -209,40 +250,6 @@ lerobot-train --help
 ```bash
 lerobot-eval --help
 ```
-
-## 常见问题
-
-### 1. 导入到了旧的 `site-packages/lerobot`
-
-重新执行 editable install，并确认：
-
-```bash
-python -c "import lerobot; print(lerobot.__file__)"
-```
-
-### 2. `xlerobot_2wheels` 导入时报 `zmq` 相关错误
-
-安装：
-
-```bash
-python -m pip install pyzmq
-```
-
-### 3. 电机扫描不到 ID
-
-优先检查：
-
-- 驱动是否正确
-- 电机总线是否上电
-- 串口是否接对
-
-在 Windows / HarmonyOS PC 场景下，如果你使用的是 CH343 类串口芯片，可能需要正确的 WCH 驱动。
-
-### 4. 退出时机械臂突然掉下去
-
-使用：
-
-- `examples/shield/4_xlerobot_2wheels_teleop_keyboard_safe_exit.py`
 
 ## 上游与参考
 
