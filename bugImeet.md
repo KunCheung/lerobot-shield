@@ -2,6 +2,8 @@
 
 This file records the issues encountered while bringing up the XLERobot 2-wheels project, along with the corresponding fixes and verification results.
 
+## 0. windows "设备管理器" 查看接入的端口，照相机数量是否正确
+
 ## 1. Python `lzma` import failure
 
 ### Symptom

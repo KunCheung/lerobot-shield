@@ -163,11 +163,14 @@ wandb/
 
 # Dev scripts
 .dev/
+*.onnx
 
 # Data folders
 data/
 outputs/
 tmp_images/
+reference_person/
+debug/
 
 # Translations
 *.mo

@@ -23,7 +23,7 @@ LATEST_LLM_INPUT_IMAGE_PATH = TMP_IMAGES_DIR / "latest_llm_input.jpg"
 MODEL_NAME = "openai:kimi-k2.5"
 MOONSHOT_BASE_URL = "https://api.moonshot.cn/v1"
 TASK = "Approach a human."
-CAMERA_ID = 1
+CAMERA_ID = 1 # check this id, use the head camera
 ROBOT_ID = "my_xlerobot_2wheels_lab"
 PORT1 = "COM5"  # left arm + head
 PORT2 = "COM4"  # right arm + 2-wheel base
@@ -49,9 +49,9 @@ if LOCAL_LEROBOT_INIT_PATH != EXPECTED_LEROBOT_INIT_PATH:
 if load_dotenv is not None and DOTENV_PATH.exists():
     load_dotenv(DOTENV_PATH, override=False)
 
-
-os.environ["MOONSHOT_API_KEY"] = os.getenv("MOONSHOT_API_KEY")
-os.environ.setdefault("OPENAI_API_KEY", moonshot_api_key)
+MOONSHOT_API_KEY = os.getenv("MOONSHOT_API_KEY")
+os.environ["MOONSHOT_API_KEY"] = MOONSHOT_API_KEY
+#os.environ.setdefault("OPENAI_API_KEY", MOONSHOT_API_KEY)
 os.environ.setdefault("OPENAI_BASE_URL", MOONSHOT_BASE_URL)
 
 import robocrew.core.memory as robocrew_memory
@@ -406,7 +406,7 @@ class DebugChatModel:
 def _patched_init_chat_model(model: str, *args, **kwargs):
     if model in {"kimi-k2.5", "openai:kimi-k2.5"}:
         kwargs.setdefault("base_url", MOONSHOT_BASE_URL)
-        kwargs.setdefault("api_key", moonshot_api_key)
+        kwargs.setdefault("api_key", MOONSHOT_API_KEY)
         if ":" not in model:
             model = "openai:kimi-k2.5"
     return DebugChatModel(lc_init_chat_model(model, *args, **kwargs))
