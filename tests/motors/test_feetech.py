@@ -112,6 +112,53 @@ def test_abc_implementation(dummy_motors):
     FeetechMotorsBus(port="/dev/dummy-port", motors=dummy_motors)
 
 
+def test_degrees_drive_mode_unnormalize_flips_input_sign():
+    motor = {"deg": Motor(1, "sts3215", MotorNormMode.DEGREES)}
+    normal_calibration = {
+        "deg": MotorCalibration(id=1, drive_mode=0, homing_offset=0, range_min=0, range_max=4095)
+    }
+    inverted_calibration = {
+        "deg": MotorCalibration(id=1, drive_mode=1, homing_offset=0, range_min=0, range_max=4095)
+    }
+
+    normal_bus = FeetechMotorsBus(port="/dev/dummy-port", motors=motor, calibration=normal_calibration)
+    inverted_bus = FeetechMotorsBus(port="/dev/dummy-port", motors=motor, calibration=inverted_calibration)
+
+    normal_negative = normal_bus._unnormalize({1: -45.0})
+    inverted_positive = inverted_bus._unnormalize({1: 45.0})
+
+    assert inverted_positive == normal_negative
+
+
+def test_degrees_drive_mode_normalize_flips_output_sign():
+    motor = {"deg": Motor(1, "sts3215", MotorNormMode.DEGREES)}
+    normal_calibration = {
+        "deg": MotorCalibration(id=1, drive_mode=0, homing_offset=0, range_min=0, range_max=4095)
+    }
+    inverted_calibration = {
+        "deg": MotorCalibration(id=1, drive_mode=1, homing_offset=0, range_min=0, range_max=4095)
+    }
+
+    normal_bus = FeetechMotorsBus(port="/dev/dummy-port", motors=motor, calibration=normal_calibration)
+    inverted_bus = FeetechMotorsBus(port="/dev/dummy-port", motors=motor, calibration=inverted_calibration)
+
+    raw_value = normal_bus._unnormalize({1: 30.0})[1]
+
+    assert normal_bus._normalize({1: raw_value})[1] == pytest.approx(30.0, abs=0.1)
+    assert inverted_bus._normalize({1: raw_value})[1] == pytest.approx(-30.0, abs=0.1)
+
+
+def test_degrees_drive_mode_round_trip_preserves_inverted_angle_semantics():
+    motor = {"deg": Motor(1, "sts3215", MotorNormMode.DEGREES)}
+    calibration = {"deg": MotorCalibration(id=1, drive_mode=1, homing_offset=0, range_min=0, range_max=4095)}
+    bus = FeetechMotorsBus(port="/dev/dummy-port", motors=motor, calibration=calibration)
+
+    raw_value = bus._unnormalize({1: 22.5})[1]
+    normalized = bus._normalize({1: raw_value})[1]
+
+    assert normalized == pytest.approx(22.5, abs=0.1)
+
+
 @pytest.mark.parametrize("id_", [1, 2, 3])
 def test_ping(id_, mock_motors, dummy_motors):
     expected_model_nb = MODEL_NUMBER_TABLE[dummy_motors[f"dummy_{id_}"].model]

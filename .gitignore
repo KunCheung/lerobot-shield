@@ -83,6 +83,8 @@ coverage.xml
 ### Logs & Temporary Files ###
 logs/
 tmp/
+debug/
+debug_live/
 *.log
 pip-log.txt
 pip-delete-this-directory.txt
@@ -182,3 +184,5 @@ debug/
 *.urdf
 *.xml
 *.part
+*.pt
+*.ts

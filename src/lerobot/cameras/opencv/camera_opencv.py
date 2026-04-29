@@ -425,7 +425,7 @@ class OpenCVCamera(Camera):
 
         return processed_image
 
-    def _read_loop(self) -> None:
+    def _read_loop(self, stop_event: Event) -> None:
         """
         Internal loop run by the background thread for asynchronous reading.
 
@@ -436,11 +436,8 @@ class OpenCVCamera(Camera):
 
         Stops on DeviceNotConnectedError, logs other errors and continues.
         """
-        if self.stop_event is None:
-            raise RuntimeError(f"{self}: stop_event is not initialized before starting read loop.")
-
         failure_count = 0
-        while not self.stop_event.is_set():
+        while not stop_event.is_set():
             try:
                 raw_frame = self._read_from_hardware()
                 processed_frame = self._postprocess_image(raw_frame)
@@ -465,8 +462,9 @@ class OpenCVCamera(Camera):
         """Starts or restarts the background read thread if it's not running."""
         self._stop_read_thread()
 
-        self.stop_event = Event()
-        self.thread = Thread(target=self._read_loop, args=(), name=f"{self}_read_loop")
+        stop_event = Event()
+        self.stop_event = stop_event
+        self.thread = Thread(target=self._read_loop, args=(stop_event,), name=f"{self}_read_loop")
         self.thread.daemon = True
         self.thread.start()
         time.sleep(0.1)

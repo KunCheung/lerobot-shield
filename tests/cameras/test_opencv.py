@@ -20,6 +20,7 @@
 # ```
 
 from pathlib import Path
+from threading import Event, Thread
 from unittest.mock import patch
 
 import cv2
@@ -156,6 +157,49 @@ def test_disconnect_before_connect():
 
     with pytest.raises(DeviceNotConnectedError):
         _ = camera.disconnect()
+
+
+def test_read_loop_uses_stable_stop_event_handle():
+    config = OpenCVCameraConfig(index_or_path=DEFAULT_PNG_FILE_PATH, warmup_s=0)
+    camera = OpenCVCamera(config)
+    stop_event = Event()
+    frame = np.zeros((120, 160, 3), dtype=np.uint8)
+
+    def fake_read_from_hardware():
+        camera.stop_event = None
+        stop_event.set()
+        return frame
+
+    camera._read_from_hardware = fake_read_from_hardware  # type: ignore[method-assign]
+    camera._postprocess_image = lambda image: image  # type: ignore[method-assign]
+
+    camera._read_loop(stop_event)
+
+    assert stop_event.is_set()
+    assert camera.latest_frame is not None
+    np.testing.assert_array_equal(camera.latest_frame, frame)
+
+
+def test_stop_read_thread_clears_thread_stop_event_and_frame_state():
+    config = OpenCVCameraConfig(index_or_path=DEFAULT_PNG_FILE_PATH, warmup_s=0)
+    camera = OpenCVCamera(config)
+    stop_event = Event()
+    camera.stop_event = stop_event
+    camera.thread = Thread(target=lambda: stop_event.wait(timeout=1.0), name="test_opencv_stop")
+    camera.thread.start()
+
+    with camera.frame_lock:
+        camera.latest_frame = np.zeros((4, 4, 3), dtype=np.uint8)
+        camera.latest_timestamp = 123.0
+        camera.new_frame_event.set()
+
+    camera._stop_read_thread()
+
+    assert camera.thread is None
+    assert camera.stop_event is None
+    assert camera.latest_frame is None
+    assert camera.latest_timestamp is None
+    assert not camera.new_frame_event.is_set()
 
 
 @pytest.mark.parametrize("index_or_path", TEST_IMAGE_PATHS, ids=TEST_IMAGE_SIZES)

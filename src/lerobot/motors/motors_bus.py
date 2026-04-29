@@ -32,7 +32,6 @@ from pprint import pformat
 from typing import Protocol
 
 import serial
-from deepdiff import DeepDiff
 from tqdm import tqdm
 
 from lerobot.utils.decorators import check_if_already_connected, check_if_not_connected
@@ -378,9 +377,7 @@ class SerialMotorsBus(MotorsBusBase):
             return False
 
         first_table = self.model_ctrl_table[self.models[0]]
-        return any(
-            DeepDiff(first_table, get_ctrl_table(self.model_ctrl_table, model)) for model in self.models[1:]
-        )
+        return any(first_table != get_ctrl_table(self.model_ctrl_table, model) for model in self.models[1:])
 
     @cached_property
     def models(self) -> list[str]:
@@ -858,7 +855,8 @@ class SerialMotorsBus(MotorsBusBase):
             elif self.motors[motor].norm_mode is MotorNormMode.DEGREES:
                 mid = (min_ + max_) / 2
                 max_res = self.model_resolution_table[self._id_to_model(id_)] - 1
-                normalized_values[id_] = (val - mid) * 360 / max_res
+                norm = (val - mid) * 360 / max_res
+                normalized_values[id_] = -norm if drive_mode else norm
             else:
                 raise NotImplementedError
 
@@ -886,6 +884,7 @@ class SerialMotorsBus(MotorsBusBase):
                 bounded_val = min(100.0, max(0.0, val))
                 unnormalized_values[id_] = int((bounded_val / 100) * (max_ - min_) + min_)
             elif self.motors[motor].norm_mode is MotorNormMode.DEGREES:
+                val = -val if drive_mode else val
                 mid = (min_ + max_) / 2
                 max_res = self.model_resolution_table[self._id_to_model(id_)] - 1
                 unnormalized_values[id_] = int((val * max_res / 360) + mid)

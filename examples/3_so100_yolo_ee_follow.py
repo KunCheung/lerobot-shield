@@ -243,6 +243,62 @@ def return_to_start_position(robot, start_positions, kp=0.5, control_freq=50):
 K_pan = -0.006  # radians per pixel (tune as needed)
 K_y = 0.00004   # meters per pixel (tune as needed)
 
+CAMERA_WIDTH = 640
+CAMERA_HEIGHT = 480
+CAMERA_FPS = 30
+YOLO_IMGSZ = 640
+YOLO_CONF = 0.25
+WINDOW_NAME = "YOLO11 Live"
+
+def _show_frame(frame):
+    """Show one frame and handle the display-window quit key."""
+    cv2.imshow(WINDOW_NAME, frame)
+    key = cv2.waitKey(1) & 0xFF
+    if key == ord("q") or key == 27:
+        raise KeyboardInterrupt
+
+def open_camera(index):
+    """
+    Open a camera with settings that are more reliable for live OpenCV display.
+
+    On Windows, DirectShow + MJPG often avoids blank/white frames from USB cameras.
+    """
+    candidates = []
+    if hasattr(cv2, "CAP_DSHOW"):
+        candidates.append(("DSHOW/MJPG", cv2.CAP_DSHOW, "MJPG"))
+        candidates.append(("DSHOW/default", cv2.CAP_DSHOW, None))
+    candidates.append(("default", None, None))
+
+    for name, backend, fourcc in candidates:
+        cap = cv2.VideoCapture(index, backend) if backend is not None else cv2.VideoCapture(index)
+        if not cap.isOpened():
+            cap.release()
+            continue
+
+        if fourcc:
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc))
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
+        cap.set(cv2.CAP_PROP_FPS, CAMERA_FPS)
+
+        frame = None
+        for _ in range(10):
+            cap.grab()
+        for _ in range(5):
+            ok, frame = cap.read()
+            if ok and frame is not None:
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                print(f"Camera opened with {name}: {width}x{height} @ {fps:.1f}fps")
+                return cap
+            time.sleep(0.05)
+
+        cap.release()
+
+    return None
+
 # Vision control update function
 def vision_control_update(target_positions, current_x, current_y, model, cap, K_pan, K_y, target_objects=["mouse"]):
     ret, frame = cap.read()
@@ -250,21 +306,56 @@ def vision_control_update(target_positions, current_x, current_y, model, cap, K_
         print("Camera frame not available")
         return current_x, current_y  # No update
 
-    results = model(frame)
-    if not results or not hasattr(results[0], 'boxes') or not results[0].boxes:
+    # Refresh the OpenCV window before YOLO inference. This keeps the preview from
+    # looking like a white/unresponsive window when a large model runs slowly.
+    annotated_frame = frame.copy()
+    h, w = frame.shape[:2]
+    cv2.drawMarker(
+        annotated_frame,
+        (w // 2, h // 2),
+        (255, 255, 255),
+        markerType=cv2.MARKER_CROSS,
+        markerSize=24,
+        thickness=2,
+    )
+    _show_frame(annotated_frame)
+
+    if not hasattr(vision_control_update, "frame_counter"):
+        vision_control_update.frame_counter = 0
+    vision_control_update.frame_counter += 1
+    if vision_control_update.frame_counter % 120 == 0:
+        frame_mean = float(frame.mean())
+        if frame_mean > 245:
+            print("Camera frame is very bright; check exposure/lighting or try another camera index.")
+
+    results = model.predict(frame, imgsz=YOLO_IMGSZ, conf=YOLO_CONF, verbose=False)
+    if not results or not hasattr(results[0], 'boxes') or len(results[0].boxes) == 0:
         print("No objects detected")
-        annotated_frame = frame
     else:
         # Find target objects in detections
-        annotated_frame = results[0].plot()
         for box in results[0].boxes:
             cls = int(box.cls[0])
             label = results[0].names[cls]
-            if label in target_objects:
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            is_target = label in target_objects
+            color = (0, 0, 255) if is_target else (0, 255, 255)
+            cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
+            cv2.putText(
+                annotated_frame,
+                label,
+                (x1, max(20, y1 - 8)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                color,
+                2,
+                cv2.LINE_AA,
+            )
+
+            if is_target:
                 cx = (x1 + x2) // 2
                 cy = (y1 + y2) // 2
-                h, w = frame.shape[:2]
+                cv2.circle(annotated_frame, (cx, cy), 5, (0, 0, 255), -1)
+                cv2.line(annotated_frame, (w // 2, h // 2), (cx, cy), (0, 0, 255), 2)
                 dx = cx - w // 2
                 dy = cy - h // 2
                 # Map dx, dy to robot control
@@ -286,10 +377,7 @@ def vision_control_update(target_positions, current_x, current_y, model, cap, K_
                 print(f"{label.capitalize()} center offset: dx={dx}, dy={dy} -> dc_y={d_current_y}, pan: {target_positions['shoulder_pan']:.2f}, y: {current_y:.3f}, joint2: {joint2_target:.2f}, joint3: {joint3_target:.2f}")
                 break  # Only use first target object found
     # Show annotated frame in a window
-    cv2.imshow("YOLO11 Live", annotated_frame)
-    # Allow quitting vision mode with 'q'
-    if cv2.waitKey(1) & 0xFF == ord("q"):
-        raise KeyboardInterrupt
+    _show_frame(annotated_frame)
     return current_x, current_y
 
 def p_control_loop(robot, keyboard, target_positions, start_positions, current_x, current_y, kp=0.5, control_freq=50, model=None, cap=None, vision_mode=False, target_objects=["mouse"]):
@@ -458,11 +546,11 @@ def main():
         from lerobot.teleoperators.keyboard.configuration_keyboard import KeyboardTeleopConfig
         
         # Get port
-        port = input("Please enter SO100 robot USB port (e.g.: /dev/ttyACM0): ").strip()
+        port = input("Please enter SO100 robot USB port (e.g.: COM4): ").strip()
         
         # If Enter is pressed directly, use default port
         if not port:
-            port = "/dev/ttyACM0"
+            port = "COM4"
             print(f"Using default port: {port}")
         else:
             print(f"Connecting to port: {port}")
@@ -559,8 +647,8 @@ def main():
             return
         print(f"Available cameras: {cameras}")
         selected = int(input(f"Select camera index from {cameras}: "))
-        cap = cv2.VideoCapture(selected)
-        if not cap.isOpened():
+        cap = open_camera(selected)
+        if cap is None or not cap.isOpened():
             print("Camera not found!")
             return
         
@@ -600,4 +688,4 @@ def main():
         print("4. Is the robot correctly configured")
 
 if __name__ == "__main__":
-    main() 
+    main()
